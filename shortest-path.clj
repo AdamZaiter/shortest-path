@@ -259,6 +259,53 @@
     (newline)
     (graph-trace-back graph start finish vertex-get-best-neighbor)))
 
+(defn graph-a*-helper! [graph start finish]
+  (graph-reset! graph)
+  (dosync
+   (ref-set (:distance (graph-get-vertex graph finish)) 0))
+  (let [queue (slist-make)
+        cnt (ref 0)]
+    (slist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
+  (graph-bfs! graph
+              start
+              (fn [vertex queue]
+                (slist-pop-first! queue)
+                (if (= start (:label vertex))
+                    false
+                (if-not (= @(:status vertex) vertex-status-visited)
+                  (do
+                  (dosync (ref-set cnt (inc @cnt)))
+                (if (= start (:label vertex))
+                    false
+                  (do
+                    (doseq [neighbor-label
+                            (filter
+                             (fn [label]
+                               (graph-vertex-unseen-or-in-queue? graph label))
+                             @(:neighbors vertex))]
+                      (let [neighbor (graph-get-vertex graph neighbor-label)
+                            weight (graph-get-edge-weight graph
+                                                          (:label vertex)
+                                                          neighbor-label)
+                            distance (+ @(:distance vertex)
+                                        weight (graph-great-circle-distance (:label vertex) finish))]
+                         (dosync (ref-set (:status neighbor) vertex-status-in-queue))
+                        (when (or (= @(:distance neighbor) 0)
+                                  (< distance @(:distance neighbor)))
+                          (dosync
+                           (ref-set (:distance neighbor)
+                                    distance)))
+                      (slist-insert-priority! queue neighbor-label @(:distance neighbor))))
+                    true))) true)))
+              queue)
+  (println "Vertices visited:" @cnt)
+  (newline)
+  (graph-dijkstra-trace-back graph start finish
+                             vertex-get-best-neighbor-a*)
+  ))
+
+
+
 (defn graph-dijkstra-with-weights-helper! [graph start finish]
   (graph-reset! graph)
   (dosync
