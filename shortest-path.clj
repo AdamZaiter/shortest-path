@@ -1,4 +1,4 @@
-with-weightsdefrecord Graph [vertices edges])
+(defrecord Graph [vertices edges])
 (defrecord Edge [from to weight label])
 (defrecord Vertex [label neighbors latitude longitude status distance])
 (defrecord SListNode [next data priority])
@@ -285,7 +285,7 @@ with-weightsdefrecord Graph [vertices edges])
                             weight (graph-get-edge-weight graph
                                                           (:label vertex)
                                                           neighbor-label)
-                            distance (+ @(:distance vertex)
+                            distance (+ 
                                         weight (graph-great-circle-distance graph neighbor-label finish))]
                          (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                         (when (or (= @(:distance neighbor) 0)
@@ -293,7 +293,10 @@ with-weightsdefrecord Graph [vertices edges])
                           (dosync
                            (ref-set (:distance neighbor)
                                     distance)))
-                      (slist-insert-priority! queue neighbor-label @(:distance neighbor))))
+                        
+                      (slist-insert-priority! queue neighbor-label @(:distance neighbor)) 
+                      ))
+                      (println (:data @(:head queue)))
                     true))) true)))
               queue)
   (println "Vertices visited:" @cnt)
