@@ -288,7 +288,6 @@ with-weightsdefrecord Graph [vertices edges])
                                                           neighbor-label)
                             distance (+ @(:distance vertex)
                                         weight (graph-great-circle-distance graph (:label vertex) start))]
-                        (println distance)
                          (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                         (when (or (= @(:distance neighbor) 0)
                                   (< distance @(:distance neighbor)))
