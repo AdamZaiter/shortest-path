@@ -263,7 +263,7 @@
   (graph-reset! graph)
   (let [queue (slist-make)
         cnt (ref 0)]
-    (slist-insert-priority! queue start @(:distance (graph-get-vertex graph start)))
+    (slist-insert-priority! queue start (graph-great-circle-distance graph start finish))
   (graph-bfs! graph
               start
               (fn [vertex queue]
@@ -285,18 +285,18 @@
                             weight (graph-get-edge-weight graph
                                                           (:label vertex)
                                                           neighbor-label)
-                            distance (+ 
+                            distance (+ (- @(:distance vertex) 
+                                           (graph-great-circle-distance graph (:label vertex) finish))
                                         weight (graph-great-circle-distance graph neighbor-label finish))]
+                                     
                          (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                         (when (or (= @(:distance neighbor) 0)
                                   (< distance @(:distance neighbor)))
                           (dosync
                            (ref-set (:distance neighbor)
                                     distance)))
-                        
                       (slist-insert-priority! queue neighbor-label @(:distance neighbor)) 
                       ))
-                      (println (:data @(:head queue)))
                     true))) true)))
               queue)
   (println "Vertices visited:" @cnt)
@@ -509,6 +509,7 @@
                                                                           neighbor-label)
                                             distance (+ @(:distance vertex)
                                                         weight)]
+                                        (println distance)
                                         (when (or (= @(:distance neighbor) 0)
                                                   (< distance @(:distance neighbor)))
                                           (dosync
