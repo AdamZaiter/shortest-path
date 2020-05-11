@@ -258,23 +258,22 @@ with-weightsdefrecord Graph [vertices edges])
     (println "Vertices visited:" @cnt)
     (newline)
     (graph-trace-back graph start finish vertex-get-best-neighbor)))
+
 (defn graph-a*-helper! [graph start finish]
   (graph-reset! graph)
-  (dosync
-   (ref-set (:distance (graph-get-vertex graph finish)) 0))
   (let [queue (slist-make)
         cnt (ref 0)]
-    (slist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
+    (slist-insert-priority! queue start @(:distance (graph-get-vertex graph start)))
   (graph-bfs! graph
-              finish
+              start
               (fn [vertex queue]
                 (slist-pop-first! queue)
-                (if (= start (:label vertex))
+                (if (= finish (:label vertex))
                     false
                 (if-not (= @(:status vertex) vertex-status-visited)
                   (do
                   (dosync (ref-set cnt (inc @cnt)))
-                (if (= start (:label vertex))
+                (if (= finish (:label vertex))
                     false
                   (do
                     (doseq [neighbor-label
@@ -287,7 +286,7 @@ with-weightsdefrecord Graph [vertices edges])
                                                           (:label vertex)
                                                           neighbor-label)
                             distance (+ @(:distance vertex)
-                                        weight (graph-great-circle-distance graph (:label vertex) start))]
+                                        weight (graph-great-circle-distance graph neighbor-label finish))]
                          (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                         (when (or (= @(:distance neighbor) 0)
                                   (< distance @(:distance neighbor)))
@@ -299,7 +298,7 @@ with-weightsdefrecord Graph [vertices edges])
               queue)
   (println "Vertices visited:" @cnt)
   (newline)
-  (graph-trace-back graph start finish
+  (graph-trace-back graph finish start
                              vertex-get-best-neighbor-with-weights)
   ))
 
