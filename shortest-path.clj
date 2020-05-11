@@ -1,4 +1,4 @@
-(defrecord Graph [vertices edges])
+with-weightsdefrecord Graph [vertices edges])
 (defrecord Edge [from to weight label])
 (defrecord Vertex [label neighbors latitude longitude status distance])
 (defrecord SListNode [next data priority])
@@ -258,7 +258,6 @@
     (println "Vertices visited:" @cnt)
     (newline)
     (graph-trace-back graph start finish vertex-get-best-neighbor)))
-
 (defn graph-a*-helper! [graph start finish]
   (graph-reset! graph)
   (dosync
@@ -267,7 +266,7 @@
         cnt (ref 0)]
     (slist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
   (graph-bfs! graph
-              start
+              finish
               (fn [vertex queue]
                 (slist-pop-first! queue)
                 (if (= start (:label vertex))
@@ -288,7 +287,8 @@
                                                           (:label vertex)
                                                           neighbor-label)
                             distance (+ @(:distance vertex)
-                                        weight (graph-great-circle-distance (:label vertex) finish))]
+                                        weight (graph-great-circle-distance graph (:label vertex) start))]
+                        (println distance)
                          (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                         (when (or (= @(:distance neighbor) 0)
                                   (< distance @(:distance neighbor)))
@@ -300,8 +300,8 @@
               queue)
   (println "Vertices visited:" @cnt)
   (newline)
-  (graph-dijkstra-trace-back graph start finish
-                             vertex-get-best-neighbor-a*)
+  (graph-trace-back graph start finish
+                             vertex-get-best-neighbor-with-weights)
   ))
 
 
@@ -406,6 +406,15 @@
         nil))
     "Invalid vertices"))
 
+(defn graph-a*! [graph start finish]
+  (if (and (graph-has-vertex? graph start)
+           (graph-has-vertex? graph finish))
+    (let [lst (graph-a*-helper! graph start finish)]
+      (if-not (empty? lst)
+        (format-lst graph lst finish)
+        nil))
+    "Invalid vertices"))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; A* SEARCH ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -476,7 +485,7 @@
              (recur (concat (graph-bfs-remove-from-queue queue current-label)
                             unseen-neighbors)))))))))
 
-(defn graph-a*-helper! [graph finish start]
+(defn graph-a-star-helper! [graph finish start]
   (graph-reset! graph)
   (dosync
     (ref-set (:distance (graph-get-vertex graph start)) 0))
@@ -512,10 +521,10 @@
   (graph-trace-back graph finish start
                     vertex-get-best-neighbor-with-weights))
 
-(defn graph-a*! [graph start finish]
+(defn graph-a-star! [graph start finish]
   (if (and (graph-has-vertex? graph start)
            (graph-has-vertex? graph finish))
-    (let [lst (graph-a*-helper! graph start finish)]
+    (let [lst (graph-a-star-helper! graph start finish)]
       (if-not (empty? lst)
         (format-lst graph lst finish)
         nil))
