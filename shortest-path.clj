@@ -48,9 +48,9 @@
   (when-not (dlist-empty? lst)
     (if (= @(:head lst) @(:tail lst))
       (dosync (ref-set (:head lst) nil)
-              (ref-set (:tail lst) nil)))
+              (ref-set (:tail lst) nil))
     (dosync (ref-set (:head lst) @(:next @(:head lst)))
-            (ref-set (:prev @(:head lst)) nil))))
+            (ref-set (:prev @(:head lst)) nil)))))
 
 (defn dlist-iter [lst]
   (if (not (dlist-empty? lst))
@@ -60,7 +60,7 @@
         (recur @(:next node))))))
 
 (defn dlist-insert-priority! [lst data priority]
-  (when-not (dlist-empty? lst)
+  (if-not (dlist-empty? lst)
     (let [inserted? (ref false)]
       (loop [current-node @(:head lst)]
         (if (<= priority (:priority current-node)) 
@@ -85,7 +85,9 @@
           (if-not (nil? @(:next current-node))
             (recur @(:next current-node)))))
       (if-not @inserted? 
-        (dlist-append! lst data priority))) true))
+        (dlist-append! lst data priority))) 
+    (dlist-prepend! lst data priority))
+    true)
 
 (defn dlist-find-and-update! [lst data priority]
   (when-not (dlist-empty? lst)
@@ -315,7 +317,7 @@
     (ref-set (:distance (graph-get-vertex graph finish)) 0))
   (let [queue (dlist-make)
         cnt (ref 0)]
-    (dlist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
+    (dlist-prepend! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
@@ -344,7 +346,7 @@
   (graph-reset! graph)
   (let [queue (dlist-make)
         cnt (ref 0)]
-    (dlist-insert-priority! queue start (graph-great-circle-distance graph start finish))
+    (dlist-prepend! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 start
                 (fn [vertex queue]
@@ -394,7 +396,7 @@
     (ref-set (:distance (graph-get-vertex graph finish)) 0))
   (let [queue (dlist-make)
         cnt (ref 0)]
-    (dlist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
+    (dlist-prepend! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
