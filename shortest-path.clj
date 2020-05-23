@@ -87,6 +87,54 @@
       (if-not @inserted? 
         (dlist-append! lst data priority))) true))
 
+(defn dlist-find-and-update! [lst data priority]
+  (when-not (dlist-empty? lst)
+  (loop [node @(:head lst)]
+    (if (= data (:data node))
+      (if (< priority @(:priority node))
+        (dosync
+          (ref-set (:priority node)
+                   priority)
+          node) 
+        false)
+      (if-not (nil? @(:next node))
+        (recur @(:next node)))))))
+
+(defn previous-exists? [node]
+  (if (nil? @(:prev node))
+    false true))
+
+(defn next-exists? [node]
+  (if (nil? @(:next node))
+    false true))
+
+(defn node-swap! [node lst]
+ (let [prev-node @(:prev node)]
+   (when-not (nil? prev-node)
+     (if (< @(:priority node) 
+            @(:priority prev-node))
+       (let [temp-next-from-node @(:next node)
+             temp-prev-from-prev-node @(:prev prev-node)]
+         (dosync (ref-set (:next prev-node)
+                          temp-next-from-node)
+                 (ref-set (:prev prev-node)
+                          node)
+                 (ref-set (:next node)
+                          prev-node)
+                 (ref-set (:prev node)
+                          temp-prev-from-prev-node))
+         (if (previous-exists? node)
+           (dosync (ref-set (:next @(:prev node))
+                            node)))
+           (if-not (previous-exists? node)
+           (dosync (ref-set (:head lst)
+                            node)))
+         (if (next-exists? prev-node)
+           (dosync (ref-set (:prev @(:next prev-node))
+                            prev-node)))
+         (if-not (next-exists? prev-node)
+           (dosync (ref-set (:tail lst)
+                            prev-node))))))) nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;; INITIALIZING THE GRAPH ;;;;;;;;;;;;;;;;;;;;;;;;;;;
