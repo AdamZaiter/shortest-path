@@ -1,67 +1,91 @@
 (defrecord Graph [vertices edges])
 (defrecord Edge [from to weight label])
 (defrecord Vertex [label neighbors latitude longitude status distance])
-(defrecord SListNode [next data priority])
-(defrecord SList [head])
-
 
 (def ^:const vertex-status-unseen 0)
 (def ^:const vertex-status-in-queue 1)
 (def ^:const vertex-status-visited 2)
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; PRIORITY QUEUE ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defrecord DListNode [prev data priority next])
+(defrecord DList [head tail])
 
-(defn slist-make[]
-  (SList. (ref nil)))
+(defn dlist-make[]
+  (DList. (ref nil) (ref nil)))
 
-(defn slist? [lst]
-  (= (class lst) SList))
-
-(defn slist-empty? [lst]
+(defn dlist-empty? [lst]
   (nil? @(:head lst)))
 
-(defn slist-first [lst]
+(defn dlist-first [lst]
   (:data @(:head lst)))
 
-(defn slist-prepend! [lst val priority]
-  (dosync
-    (ref-set (:head lst)
-             (SListNode. (ref (deref (:head lst))) val priority))))
+(defn dlist-prepend! [lst data priority]
+  (let [new-node (DListNode. (ref nil) data priority
+                             (ref @(:head lst)))]
+    (if (dlist-empty? lst)
+      (dosync (ref-set (:head lst) new-node)
+              (ref-set (:tail lst) new-node))
+      (dosync (ref-set (:prev @(:head lst)) new-node)
+              (ref-set (:head lst) new-node)))) true)
 
-(defn slist-insert-priority! [lst val priority]
-  (if-not (nil? @(:head lst))
-    (let [tracer @(:head lst)
-          flag (ref false)]
-      (if (<= priority (:priority tracer))
-        (do
-          (slist-prepend! lst val priority) true)
-        (if-not (nil? @(:next tracer))
-          (loop [next-node @(:next tracer)
-                 tracer tracer]
-            (if (<= priority (:priority next-node))
-              (dosync
-                (ref-set (:next tracer)
-                         (SListNode. (ref next-node) val priority))
-                (ref-set flag true))
-              (if (and (not @flag) (nil? @(:next next-node)))
-                (dosync
-                  (ref-set (:next next-node)
-                           (SListNode. (ref nil) val priority)) true)
-                (recur @(:next next-node) @(:next tracer)))))
-          (dosync
-            (ref-set (:next tracer)
-                     (SListNode. (ref nil) val priority)) true))))
-    (dosync
-      (ref-set (:head lst)
-               (SListNode. (ref (deref (:head lst))) val priority)))))
+(defn dlist-append! [lst data priority]
+  (let [new-node (DListNode. (ref @(:tail lst)) data
+                             priority (ref nil))]
+    (if (dlist-empty? lst)
+      (dosync (ref-set (:head lst) new-node)
+              (ref-set (:tail lst) new-node))
+      (dosync (ref-set (:next @(:tail lst)) new-node)
+              (ref-set (:tail lst) new-node)))))
 
-(defn slist-pop-first! [lst]
-  (dosync
-    (ref-set (:head lst) @(:next @(:head lst)))) true)
+(defn dlist-rest [lst]
+  (DList. (ref @(:next @(:head lst)))
+          (ref @(:tail lst))))
+
+(defn dlist-rem-first! [lst]
+  (when-not (dlist-empty? lst)
+    (if (= @(:head lst) @(:tail lst))
+      (dosync (ref-set (:head lst) nil)
+              (ref-set (:tail lst) nil)))
+    (dosync (ref-set (:head lst) @(:next @(:head lst)))
+            (ref-set (:prev @(:head lst)) nil))))
+
+(defn dlist-iter [lst]
+  (if (not (dlist-empty? lst))
+    (loop [node @(:head lst)]
+      (println (:data node) ":" (:priority node))
+      (if (not (= node @(:tail lst)))
+        (recur @(:next node))))))
+
+(defn dlist-insert-priority! [lst data priority]
+  (when-not (dlist-empty? lst)
+    (let [inserted? (ref false)]
+      (loop [current-node @(:head lst)]
+        (if (<= priority (:priority current-node)) 
+          (let [new-node (DListNode. (ref nil)
+                                     data
+                                     priority
+                                     (ref current-node))
+                previous-node @(ref @(:prev current-node))]
+            (if-not (nil? previous-node)
+              (dosync (ref-set (:prev current-node)
+                               new-node)
+                      (ref-set (:prev new-node)
+                               previous-node)
+                      (ref-set (:next previous-node)
+                               new-node)
+                      (ref-set inserted? true))
+              (dosync (ref-set (:prev current-node)
+                               new-node)
+                      (ref-set (:head lst)
+                               new-node)
+                      (ref-set inserted? true))))
+          (if-not (nil? @(:next current-node))
+            (recur @(:next current-node)))))
+      (if-not @inserted? 
+        (dlist-append! lst data priority))) true))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -264,46 +288,46 @@
   (let [queue (slist-make)
         cnt (ref 0)]
     (slist-insert-priority! queue start (graph-great-circle-distance graph start finish))
-  (graph-bfs! graph
-              start
-              (fn [vertex queue]
-                (slist-pop-first! queue)
-                (if (= finish (:label vertex))
+    (graph-bfs! graph
+                start
+                (fn [vertex queue]
+                  (slist-pop-first! queue)
+                  (if (= finish (:label vertex))
                     false
-                (if-not (= @(:status vertex) vertex-status-visited)
-                  (do
-                  (dosync (ref-set cnt (inc @cnt)))
-                (if (= finish (:label vertex))
-                    false
-                  (do
-                    (doseq [neighbor-label
-                            (filter
-                             (fn [label]
-                               (graph-vertex-unseen-or-in-queue? graph label))
-                             @(:neighbors vertex))]
-                      (let [neighbor (graph-get-vertex graph neighbor-label)
-                            weight (graph-get-edge-weight graph
-                                                          (:label vertex)
-                                                          neighbor-label)
-                            distance (+ (- @(:distance vertex) 
-                                           (graph-great-circle-distance graph (:label vertex) finish))
-                                        weight (graph-great-circle-distance graph neighbor-label finish))]
-                                     
-                         (dosync (ref-set (:status neighbor) vertex-status-in-queue))
-                        (when (or (= @(:distance neighbor) 0)
-                                  (< distance @(:distance neighbor)))
-                          (dosync
-                           (ref-set (:distance neighbor)
-                                    distance)))
-                      (slist-insert-priority! queue neighbor-label @(:distance neighbor)) 
-                      ))
-                    true))) true)))
-              queue)
-  (println "Vertices visited:" @cnt)
-  (newline)
-  (graph-trace-back graph finish start
-                             vertex-get-best-neighbor-with-weights)
-  ))
+                    (if-not (= @(:status vertex) vertex-status-visited)
+                      (do
+                        (dosync (ref-set cnt (inc @cnt)))
+                        (if (= finish (:label vertex))
+                          false
+                          (do
+                            (doseq [neighbor-label
+                                    (filter
+                                      (fn [label]
+                                        (graph-vertex-unseen-or-in-queue? graph label))
+                                      @(:neighbors vertex))]
+                              (let [neighbor (graph-get-vertex graph neighbor-label)
+                                    weight (graph-get-edge-weight graph
+                                                                  (:label vertex)
+                                                                  neighbor-label)
+                                    distance (+ (- @(:distance vertex) 
+                                                   (graph-great-circle-distance graph (:label vertex) finish))
+                                                weight (graph-great-circle-distance graph neighbor-label finish))]
+
+                                (dosync (ref-set (:status neighbor) vertex-status-in-queue))
+                                (when (or (= @(:distance neighbor) 0)
+                                          (< distance @(:distance neighbor)))
+                                  (dosync
+                                    (ref-set (:distance neighbor)
+                                             distance)))
+                                (slist-insert-priority! queue neighbor-label @(:distance neighbor)) 
+                                ))
+                            true))) true)))
+                queue)
+    (println "Vertices visited:" @cnt)
+    (newline)
+    (graph-trace-back graph finish start
+                      vertex-get-best-neighbor-with-weights)
+    ))
 
 
 
