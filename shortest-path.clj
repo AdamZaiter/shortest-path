@@ -250,8 +250,8 @@
    (graph-bfs! graph start func (fn [graph queue] (first queue))))
   ([graph start func queue]
    (loop []
-     (when-not (slist-empty? queue)
-       (let [current-label (slist-first queue)
+     (when-not (dlist-empty? queue)
+       (let [current-label (dlist-first queue)
              current-vertex (get @(:vertices graph) current-label)
              current-neighbors @(:neighbors current-vertex)
              unseen-neighbors (filter #(graph-vertex-unseen? graph %1)
@@ -313,13 +313,13 @@
   (graph-reset! graph)
   (dosync
     (ref-set (:distance (graph-get-vertex graph finish)) 0))
-  (let [queue (slist-make)
+  (let [queue (dlist-make)
         cnt (ref 0)]
-    (slist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
+    (dlist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
-                  (slist-pop-first! queue)
+                  (dlist-rem-first! queue)
                   (if (= start (:label vertex))
                     false
                     (if-not (= @(:status vertex) vertex-status-visited)
@@ -334,7 +334,7 @@
                               (ref-set (:distance neighbor)
                                        (inc @(:distance vertex)))
                               (ref-set (:status neighbor) vertex-status-in-queue))
-                            (slist-insert-priority! queue neighbor-label @(:distance neighbor))))
+                            (dlist-insert-priority! queue neighbor-label @(:distance neighbor))))
                         true)))) queue)
     (println "Vertices visited:" @cnt)
     (newline)
@@ -342,13 +342,13 @@
 
 (defn graph-a*-helper! [graph start finish]
   (graph-reset! graph)
-  (let [queue (slist-make)
+  (let [queue (dlist-make)
         cnt (ref 0)]
-    (slist-insert-priority! queue start (graph-great-circle-distance graph start finish))
+    (dlist-insert-priority! queue start (graph-great-circle-distance graph start finish))
     (graph-bfs! graph
                 start
                 (fn [vertex queue]
-                  (slist-pop-first! queue)
+                  (dlist-rem-first! queue)
                   (if (= finish (:label vertex))
                     false
                     (if-not (= @(:status vertex) vertex-status-visited)
@@ -376,7 +376,7 @@
                                   (dosync
                                     (ref-set (:distance neighbor)
                                              distance)))
-                                (slist-insert-priority! queue neighbor-label @(:distance neighbor)) 
+                                (dlist-insert-priority! queue neighbor-label @(:distance neighbor)) 
                                 ))
                             true))) true)))
                 queue)
@@ -392,13 +392,13 @@
   (graph-reset! graph)
   (dosync
     (ref-set (:distance (graph-get-vertex graph finish)) 0))
-  (let [queue (slist-make)
+  (let [queue (dlist-make)
         cnt (ref 0)]
-    (slist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
+    (dlist-insert-priority! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
-                  (slist-pop-first! queue)
+                  (dlist-rem-first! queue)
                   (if (= start (:label vertex))
                     false
                     (if-not (= @(:status vertex) vertex-status-visited)
@@ -424,7 +424,7 @@
                                   (dosync
                                     (ref-set (:distance neighbor)
                                              distance)))
-                                (slist-insert-priority! queue neighbor-label @(:distance neighbor))))
+                                (dlist-insert-priority! queue neighbor-label @(:distance neighbor))))
                             true))) true)))
                 queue)
     (println "Vertices visited:" @cnt)
