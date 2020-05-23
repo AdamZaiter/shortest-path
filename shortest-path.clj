@@ -109,7 +109,9 @@
     false true))
 
 (defn node-swap! [node lst]
- (let [prev-node @(:prev node)]
+(if-not (= false node)
+ (let [prev-node @(:prev node)
+       swapped? (ref false)]
    (when-not (nil? prev-node)
      (if (< @(:priority node) 
             @(:priority prev-node))
@@ -122,7 +124,8 @@
                  (ref-set (:next node)
                           prev-node)
                  (ref-set (:prev node)
-                          temp-prev-from-prev-node))
+                          temp-prev-from-prev-node)
+                 (ref-set swapped? true))
          (if (previous-exists? node)
            (dosync (ref-set (:next @(:prev node))
                             node)))
@@ -134,7 +137,13 @@
                             prev-node)))
          (if-not (next-exists? prev-node)
            (dosync (ref-set (:tail lst)
-                            prev-node))))))) nil)
+                            prev-node)))))) @swapped?) false))
+
+(defn dlist-bubble-swap! [lst label priority]
+  (loop [node (dlist-find-and-update! lst label priority)]
+    (if-not (= (node-swap! node lst) false)
+        (recur node))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;; INITIALIZING THE GRAPH ;;;;;;;;;;;;;;;;;;;;;;;;;;;
