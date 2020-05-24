@@ -23,7 +23,7 @@
   (:data @(:head lst)))
 
 (defn dlist-prepend! [lst data priority]
-  (let [new-node (DListNode. (ref nil) data priority
+  (let [new-node (DListNode. (ref nil) data (ref priority)
                              (ref @(:head lst)))]
     (if (dlist-empty? lst)
       (dosync (ref-set (:head lst) new-node)
@@ -33,7 +33,7 @@
 
 (defn dlist-append! [lst data priority]
   (let [new-node (DListNode. (ref @(:tail lst)) data
-                             priority (ref nil))]
+                             (ref priority) (ref nil))]
     (if (dlist-empty? lst)
       (dosync (ref-set (:head lst) new-node)
               (ref-set (:tail lst) new-node))
@@ -49,8 +49,8 @@
     (if (= @(:head lst) @(:tail lst))
       (dosync (ref-set (:head lst) nil)
               (ref-set (:tail lst) nil))
-    (dosync (ref-set (:head lst) @(:next @(:head lst)))
-            (ref-set (:prev @(:head lst)) nil)))))
+      (dosync (ref-set (:head lst) @(:next @(:head lst)))
+              (ref-set (:prev @(:head lst)) nil)))))
 
 (defn dlist-iter [lst]
   (if (not (dlist-empty? lst))
@@ -63,10 +63,10 @@
   (if-not (dlist-empty? lst)
     (let [inserted? (ref false)]
       (loop [current-node @(:head lst)]
-        (if (<= priority (:priority current-node)) 
+        (if (<= priority @(:priority current-node)) 
           (let [new-node (DListNode. (ref nil)
                                      data
-                                     priority
+                                     (ref priority)
                                      (ref current-node))
                 previous-node @(ref @(:prev current-node))]
             (if-not (nil? previous-node)
@@ -87,20 +87,20 @@
       (if-not @inserted? 
         (dlist-append! lst data priority))) 
     (dlist-prepend! lst data priority))
-    true)
+  true)
 
 (defn dlist-find-and-update! [lst data priority]
   (when-not (dlist-empty? lst)
-  (loop [node @(:head lst)]
-    (if (= data (:data node))
-      (if (< priority @(:priority node))
-        (dosync
-          (ref-set (:priority node)
-                   priority)
-          node) 
-        false)
-      (if-not (nil? @(:next node))
-        (recur @(:next node)))))))
+    (loop [node @(:head lst)]
+      (if (= data (:data node))
+        (if (< priority @(:priority node))
+          (dosync
+            (ref-set (:priority node)
+                     priority)
+            node) 
+          false)
+        (if-not (nil? @(:next node))
+          (recur @(:next node)))))))
 
 (defn previous-exists? [node]
   (if (nil? @(:prev node))
@@ -111,40 +111,40 @@
     false true))
 
 (defn node-swap! [node lst]
-(if-not (= false node)
- (let [prev-node @(:prev node)
-       swapped? (ref false)]
-   (when-not (nil? prev-node)
-     (if (< @(:priority node) 
-            @(:priority prev-node))
-       (let [temp-next-from-node @(:next node)
-             temp-prev-from-prev-node @(:prev prev-node)]
-         (dosync (ref-set (:next prev-node)
-                          temp-next-from-node)
-                 (ref-set (:prev prev-node)
-                          node)
-                 (ref-set (:next node)
-                          prev-node)
-                 (ref-set (:prev node)
-                          temp-prev-from-prev-node)
-                 (ref-set swapped? true))
-         (if (previous-exists? node)
-           (dosync (ref-set (:next @(:prev node))
-                            node)))
-           (if-not (previous-exists? node)
-           (dosync (ref-set (:head lst)
-                            node)))
-         (if (next-exists? prev-node)
-           (dosync (ref-set (:prev @(:next prev-node))
-                            prev-node)))
-         (if-not (next-exists? prev-node)
-           (dosync (ref-set (:tail lst)
-                            prev-node)))))) @swapped?) false))
+  (if-not (= false node)
+    (let [prev-node @(:prev node)
+          swapped? (ref false)]
+      (when-not (nil? prev-node)
+        (if (< @(:priority node) 
+               @(:priority prev-node))
+          (let [temp-next-from-node @(:next node)
+                temp-prev-from-prev-node @(:prev prev-node)]
+            (dosync (ref-set (:next prev-node)
+                             temp-next-from-node)
+                    (ref-set (:prev prev-node)
+                             node)
+                    (ref-set (:next node)
+                             prev-node)
+                    (ref-set (:prev node)
+                             temp-prev-from-prev-node)
+                    (ref-set swapped? true))
+            (if (previous-exists? node)
+              (dosync (ref-set (:next @(:prev node))
+                               node)))
+            (if-not (previous-exists? node)
+              (dosync (ref-set (:head lst)
+                               node)))
+            (if (next-exists? prev-node)
+              (dosync (ref-set (:prev @(:next prev-node))
+                               prev-node)))
+            (if-not (next-exists? prev-node)
+              (dosync (ref-set (:tail lst)
+                               prev-node)))))) @swapped?) false))
 
 (defn dlist-bubble-swap! [lst label priority]
   (loop [node (dlist-find-and-update! lst label priority)]
     (if-not (= (node-swap! node lst) false)
-        (recur node))))
+      (recur node))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -220,6 +220,9 @@
 
 (defn graph-vertex-unseen? [graph label]
   (graph-vertex-status? graph label vertex-status-unseen))
+
+(defn graph-vertex-in-queue? [graph label]
+  (graph-vertex-status? graph label vertex-status-in-queue))
 
 (defn graph-vertex-unseen-or-in-queue? [graph label]
   (or (graph-vertex-status? graph label vertex-status-unseen)
@@ -329,14 +332,20 @@
                         (dosync (ref-set cnt (inc @cnt)))
                         (doseq [neighbor-label
                                 (filter (fn [label]
-                                          (graph-vertex-unseen? graph label))
+                                          (graph-vertex-unseen-or-in-queue? graph label))
                                         @(:neighbors vertex))]
                           (let [neighbor (graph-get-vertex graph neighbor-label)]
                             (dosync
-                              (ref-set (:distance neighbor)
-                                       (inc @(:distance vertex)))
+                              (if (or (> @(:distance neighbor)
+                                         (inc @(:distance vertex)))
+                                      (= @(:distance neighbor) 0))
+                                (ref-set (:distance neighbor)
+                                         (inc @(:distance vertex))))
+                              (if (graph-vertex-in-queue? graph neighbor-label)
+                                (dlist-bubble-swap! queue neighbor-label @(:distance neighbor))
+                                (dlist-insert-priority! queue neighbor-label @(:distance neighbor)))
                               (ref-set (:status neighbor) vertex-status-in-queue))
-                            (dlist-insert-priority! queue neighbor-label @(:distance neighbor))))
+                            ))
                         true)))) queue)
     (println "Vertices visited:" @cnt)
     (newline)
@@ -420,13 +429,16 @@
                                                                   neighbor-label)
                                     distance (+ @(:distance vertex)
                                                 weight)]
-                                (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                                 (when (or (= @(:distance neighbor) 0)
                                           (< distance @(:distance neighbor)))
                                   (dosync
                                     (ref-set (:distance neighbor)
                                              distance)))
-                                (dlist-insert-priority! queue neighbor-label @(:distance neighbor))))
+                                (if (graph-vertex-in-queue? graph neighbor-label)
+                                  (dlist-bubble-swap! queue neighbor-label @(:distance neighbor))
+                                  (dlist-insert-priority! queue neighbor-label @(:distance neighbor)))
+                                (dosync (ref-set (:status neighbor) vertex-status-in-queue))
+                                ))
                             true))) true)))
                 queue)
     (println "Vertices visited:" @cnt)
