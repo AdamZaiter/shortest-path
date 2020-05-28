@@ -1,6 +1,6 @@
 (defrecord Graph [vertices edges])
 (defrecord Edge [from to weight label])
-(defrecord Vertex [label neighbors latitude longitude status distance])
+(defrecord Vertex [label neighbors latitude longitude status distance distance-to-finish])
 
 (def ^:const vertex-status-unseen 0)
 (def ^:const vertex-status-in-queue 1)
@@ -165,7 +165,7 @@
                       label
                       (Vertex. label (ref '()) lat lon
                                (ref vertex-status-unseen)
-                               (ref 0)))) true)
+                               (ref 0) (ref 0)))) true)
     (do
       (println "Vertex already in the graph") false)))
 
@@ -239,12 +239,6 @@
    (:weight e))
   ([graph from to]
    (graph-get-edge-weight (graph-get-edge graph from to))))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;; DIJKSTRA'S ALGORITHM ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 (defn graph-bfs!
   ([graph]
@@ -351,54 +345,6 @@
     (newline)
     (graph-trace-back graph start finish vertex-get-best-neighbor)))
 
-(defn graph-a*-helper! [graph start finish]
-  (graph-reset! graph)
-  (let [queue (dlist-make)
-        cnt (ref 0)]
-    (dlist-prepend! queue finish @(:distance (graph-get-vertex graph finish)))
-    (graph-bfs! graph
-                start
-                (fn [vertex queue]
-                  (dlist-rem-first! queue)
-                  (if (= finish (:label vertex))
-                    false
-                    (if-not (= @(:status vertex) vertex-status-visited)
-                      (do
-                        (dosync (ref-set cnt (inc @cnt)))
-                        (if (= finish (:label vertex))
-                          false
-                          (do
-                            (doseq [neighbor-label
-                                    (filter
-                                      (fn [label]
-                                        (graph-vertex-unseen-or-in-queue? graph label))
-                                      @(:neighbors vertex))]
-                              (let [neighbor (graph-get-vertex graph neighbor-label)
-                                    weight (graph-get-edge-weight graph
-                                                                  (:label vertex)
-                                                                  neighbor-label)
-                                    distance (+ (- @(:distance vertex) 
-                                                   (graph-great-circle-distance graph (:label vertex) finish))
-                                                weight (graph-great-circle-distance graph neighbor-label finish))]
-
-                                (dosync (ref-set (:status neighbor) vertex-status-in-queue))
-                                (when (or (= @(:distance neighbor) 0)
-                                          (< distance @(:distance neighbor)))
-                                  (dosync
-                                    (ref-set (:distance neighbor)
-                                             distance)))
-                                (dlist-insert-priority! queue neighbor-label @(:distance neighbor)) 
-                                ))
-                            true))) true)))
-                queue)
-    (println "Vertices visited:" @cnt)
-    (newline)
-    (graph-trace-back graph finish start
-                      vertex-get-best-neighbor-with-weights)
-    ))
-
-
-
 (defn graph-dijkstra-with-weights-helper! [graph start finish]
   (graph-reset! graph)
   (dosync
@@ -446,6 +392,55 @@
     (graph-trace-back graph start finish
                       vertex-get-best-neighbor-with-weights)
     ))
+
+(defn graph-a*-helper! [graph start finish]
+  (graph-reset! graph)
+  (let [queue (dlist-make)
+        cnt (ref 0)]
+    (dlist-prepend! queue finish @(:distance (graph-get-vertex graph start)))
+    (graph-bfs! graph
+                finish
+                (fn [vertex queue]
+                  (dlist-rem-first! queue)
+                  (if (= start (:label vertex))
+                    false
+                    (if-not (= @(:status vertex) vertex-status-visited)
+                      (do
+                        (dosync (ref-set cnt (inc @cnt)))
+                        (if (= start (:label vertex))
+                          false
+                          (do
+                            (doseq [neighbor-label
+                                    (filter
+                                      (fn [label]
+                                        (graph-vertex-unseen-or-in-queue? graph label))
+                                      @(:neighbors vertex))]
+                              (let [neighbor (graph-get-vertex graph neighbor-label)
+                                    weight (graph-get-edge-weight graph
+                                                                  (:label vertex)
+                                                                  neighbor-label)
+                                    distance (+ @(:distance vertex) 
+                                                weight)
+                                    cost-estimation (graph-great-circle-distance graph neighbor-label start)]
+                                (dosync (ref-set (:status neighbor) vertex-status-in-queue))
+                                (when (or (= @(:distance neighbor) 0)
+                                          (< cost-estimation (+ @(:distance neighbor)
+                                                                @(:distance-to-finish neighbor))))
+                                  (dosync
+                                    (ref-set (:distance-to-finish neighbor) 
+                                             cost-estimation)
+                                    (ref-set (:distance neighbor)
+                                             distance)))
+                                (dlist-insert-priority! queue neighbor-label (+ cost-estimation @(:distance neighbor)))
+                                ))
+                            true))) true)))
+                queue)
+    (println "Vertices visited:" @cnt)
+    (newline)
+    (graph-trace-back graph start finish
+                      vertex-get-best-neighbor-with-weights)
+    ))
+
 
 (defn format-lst [g lst finish]
   (newline)(newline)
@@ -506,122 +501,6 @@
   (if (and (graph-has-vertex? graph start)
            (graph-has-vertex? graph finish))
     (let [lst (graph-a*-helper! graph start finish)]
-      (if-not (empty? lst)
-        (format-lst graph lst finish)
-        nil))
-    "Invalid vertices"))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; A* SEARCH ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-(defn graph-bfs-remove-from-queue [queue label]
-  (filter (fn [x]
-            (not (= x label)))
-          queue))
-
-(defn graph-great-circle-distance [graph label1 label2]
-  (let [vertex1 (graph-get-vertex graph label1)
-        vertex2 (graph-get-vertex graph label2)
-        lat1 (:latitude vertex1)
-        lon1 (:longitude vertex1)
-        lat2 (:latitude vertex2)
-        lon2 (:longitude vertex2)
-        dl (Math/abs (- lon2 lon1)) ; lambda - longitude
-        dp (Math/abs (- lat2 lat1)) ; phi - latitude
-        dlr (/ (* Math/PI dl) 180)
-        dpr (/ (* Math/PI dp) 180)
-        l1 (/ (* Math/PI lon1) 180)
-        p1 (/ (* Math/PI lat1) 180)
-        l2 (/ (* Math/PI lon2) 180)
-        p2 (/ (* Math/PI lat2) 180)
-        ds (Math/acos (+ (* (Math/sin p1) (Math/sin p2))
-                         (* (Math/cos p1) (Math/cos p2) (Math/cos dlr))))]
-    (* 6378 ds)))
-
-(defn graph-a-star-pick-best [graph queue finish]
-  (let [best-distance (ref ##Inf)
-        best-label (ref "")]
-    (doseq [label queue]
-      (let [vertex (graph-get-vertex graph label)
-            distance-to-finish (graph-great-circle-distance graph
-                                                            label
-                                                            finish)
-            cost-estimation (+ @(:distance vertex) distance-to-finish)]
-        (if (< cost-estimation @best-distance)
-          (dosync
-            (ref-set best-distance cost-estimation)
-            (ref-set best-label (:label vertex))))))
-    @best-label))
-
-(defn graph-best-first-search!
-  ([graph]
-   (graph-best-first-search! graph (first (keys @(:vertices graph)))))
-  ([graph start]
-   (graph-best-first-search! graph start (fn [x] true)))
-  ([graph start func]
-   (graph-best-first-search! graph start func (fn [graph queue] (first queue))))
-  ([graph start func pick-best]
-   (loop [queue (list start)]
-     (when-not (empty? queue)
-       (let [current-label (pick-best graph queue)
-             current-vertex (get @(:vertices graph) current-label)
-             current-neighbors @(:neighbors current-vertex)
-             unseen-neighbors (filter #(graph-vertex-unseen? graph %1)
-                                      current-neighbors)]
-         (let [continue? (func current-vertex)]
-           (dosync (ref-set (:status current-vertex) vertex-status-visited))
-           (dosync
-             (doseq [neighbor unseen-neighbors]
-               (ref-set (:status (get @(:vertices graph) neighbor))
-                        vertex-status-in-queue)))
-           (if continue?
-             (recur (concat (graph-bfs-remove-from-queue queue current-label)
-                            unseen-neighbors)))))))))
-
-(defn graph-a-star-helper! [graph finish start]
-  (graph-reset! graph)
-  (dosync
-    (ref-set (:distance (graph-get-vertex graph start)) 0))
-  (let [cnt (ref 0)]
-    (graph-best-first-search! graph
-                              start
-                              (fn [vertex]
-                                (dosync (ref-set cnt (inc @cnt)))
-                                (if (= finish (:label vertex))
-                                  false
-                                  (do
-                                    (doseq [neighbor-label
-                                            (filter
-                                              (fn [label]
-                                                (graph-vertex-unseen-or-in-queue? graph label))
-                                              @(:neighbors vertex))]
-                                      (let [neighbor (graph-get-vertex graph neighbor-label)
-                                            weight (graph-get-edge-weight graph
-                                                                          (:label vertex)
-                                                                          neighbor-label)
-                                            distance (+ @(:distance vertex)
-                                                        weight)]
-                                        (println distance)
-                                        (when (or (= @(:distance neighbor) 0)
-                                                  (< distance @(:distance neighbor)))
-                                          (dosync
-                                            (ref-set (:distance neighbor)
-                                                     distance)))))
-                                    true)))
-                              (fn [graph queue]
-                                (graph-a-star-pick-best graph queue finish)))
-    (println "Vertices visited:" @cnt)
-    (newline))
-  (graph-trace-back graph finish start
-                    vertex-get-best-neighbor-with-weights))
-
-(defn graph-a-star! [graph start finish]
-  (if (and (graph-has-vertex? graph start)
-           (graph-has-vertex? graph finish))
-    (let [lst (graph-a-star-helper! graph start finish)]
       (if-not (empty? lst)
         (format-lst graph lst finish)
         nil))
