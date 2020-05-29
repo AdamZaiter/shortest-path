@@ -393,6 +393,25 @@
                       vertex-get-best-neighbor-with-weights)
     ))
 
+(defn graph-great-circle-distance [graph label1 label2]
+  (let [vertex1 (graph-get-vertex graph label1)
+        vertex2 (graph-get-vertex graph label2)
+        lat1 (:latitude vertex1)
+        lon1 (:longitude vertex1)
+        lat2 (:latitude vertex2)
+        lon2 (:longitude vertex2)
+        dl (Math/abs (- lon2 lon1)) ; lambda - longitude
+        dp (Math/abs (- lat2 lat1)) ; phi - latitude
+        dlr (/ (* Math/PI dl) 180)
+        dpr (/ (* Math/PI dp) 180)
+        l1 (/ (* Math/PI lon1) 180)
+        p1 (/ (* Math/PI lat1) 180)
+        l2 (/ (* Math/PI lon2) 180)
+        p2 (/ (* Math/PI lat2) 180)
+        ds (Math/acos (+ (* (Math/sin p1) (Math/sin p2))
+                         (* (Math/cos p1) (Math/cos p2) (Math/cos dlr))))]
+    (* 6378 ds)))
+
 (defn graph-a*-helper! [graph start finish]
   (graph-reset! graph)
   (let [queue (dlist-make)
