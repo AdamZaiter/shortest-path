@@ -10,6 +10,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; PRIORITY QUEUE ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; creating a doubly linked list that will serve 
+; as a priority queue
 (defrecord DListNode [prev data priority next])
 (defrecord DList [head tail])
 
@@ -40,10 +42,6 @@
       (dosync (ref-set (:next @(:tail lst)) new-node)
               (ref-set (:tail lst) new-node)))))
 
-(defn dlist-rest [lst]
-  (DList. (ref @(:next @(:head lst)))
-          (ref @(:tail lst))))
-
 (defn dlist-rem-first! [lst]
   (when-not (dlist-empty? lst)
     (if (= @(:head lst) @(:tail lst))
@@ -59,8 +57,13 @@
       (if (not (= node @(:tail lst)))
         (recur @(:next node))))))
 
+; inserts a node in the correct position based 
+; on it's priority
 (defn dlist-insert-priority! [lst data priority]
   (if-not (dlist-empty? lst)
+    ; inserted? is used to check if the list was 
+    ; iterated through without inserting anywhere
+    ; in that case the value needs to be appended
     (let [inserted? (ref false)]
       (loop [current-node @(:head lst)]
         (if (<= priority @(:priority current-node)) 
@@ -69,6 +72,9 @@
                                      (ref priority)
                                      (ref current-node))
                 previous-node @(ref @(:prev current-node))]
+            ; if the previous node isn't nil,
+            ; we insert the node before current node 
+            ; and set the pointers to point correctly
             (if-not (nil? previous-node)
               (dosync (ref-set (:prev current-node)
                                new-node)
@@ -77,20 +83,30 @@
                       (ref-set (:next previous-node)
                                new-node)
                       (ref-set inserted? true))
+              ; if the previous node is nil, we
+              ; need to set the head of the list to point
+              ; to the newly created node
               (dosync (ref-set (:prev current-node)
                                new-node)
                       (ref-set (:head lst)
                                new-node)
                       (ref-set inserted? true))))
+          ; repeat this process if there wasn't an insertion
+          ; until we arrive at the end of the list
           (if-not (nil? @(:next current-node))
             (recur @(:next current-node)))))
       (if-not @inserted? 
         (dlist-append! lst data priority))) 
+    ; this triggers if the list is empty, 
+    ; the value is inserted usind prepend
     (dlist-prepend! lst data priority))
   true)
 
+; tries to find a value in the list and 
+; update the priority if it's smaller than
+; the current priority
 (defn dlist-find-and-update! [lst data priority]
-  (when-not (dlist-empty? lst)
+  (if-not (dlist-empty? lst)
     (loop [node @(:head lst)]
       (if (= data (:data node))
         (if (< priority @(:priority node))
@@ -100,7 +116,7 @@
             node) 
           false)
         (if-not (nil? @(:next node))
-          (recur @(:next node)))))))
+          (recur @(:next node))))) false))
 
 (defn previous-exists? [node]
   (if (nil? @(:prev node))
@@ -110,6 +126,8 @@
   (if (nil? @(:next node))
     false true))
 
+; swaps nodes if their priority is 
+; not in the correct order
 (defn node-swap! [node lst]
   (if-not (= false node)
     (let [prev-node @(:prev node)
@@ -117,6 +135,9 @@
       (when-not (nil? prev-node)
         (if (< @(:priority node) 
                @(:priority prev-node))
+          ; temp nodes are stored, so that if the nodes that are
+          ; to be swapped have preceeding or succeeding nodes, their
+          ; respective pointers can be set to the correct value
           (let [temp-next-from-node @(:next node)
                 temp-prev-from-prev-node @(:prev prev-node)]
             (dosync (ref-set (:next prev-node)
@@ -130,16 +151,15 @@
                     (ref-set swapped? true))
             (if (previous-exists? node)
               (dosync (ref-set (:next @(:prev node))
-                               node)))
-            (if-not (previous-exists? node)
+                               node))
               (dosync (ref-set (:head lst)
                                node)))
             (if (next-exists? prev-node)
               (dosync (ref-set (:prev @(:next prev-node))
-                               prev-node)))
-            (if-not (next-exists? prev-node)
+                               prev-node))
               (dosync (ref-set (:tail lst)
-                               prev-node)))))) @swapped?) false))
+                               prev-node))))))
+                                @swapped?) false))
 
 (defn dlist-bubble-swap! [lst label priority]
   (loop [node (dlist-find-and-update! lst label priority)]
@@ -460,7 +480,6 @@
                       vertex-get-best-neighbor-with-weights)
     ))
 
-
 (defn format-lst [g lst finish]
   (newline)(newline)
   (println "------------------------------------------")
@@ -496,7 +515,7 @@
             (recur (rest x)))
           (ref-set string (str @string "take the road to " finish
                                " and you will arrive at the finish!")))))
-    (println @string)))
+    @string))
 
 (defn graph-dijkstra! [graph start finish]
   (if (and (graph-has-vertex? graph start)
