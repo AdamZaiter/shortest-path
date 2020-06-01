@@ -217,12 +217,15 @@
 
 (defn vertex-reset-distance! [vertex]
   (dosync
-    (ref-set (:distance vertex) 0)))
+    (ref-set (:distance vertex) 0)
+    (ref-set (:distance-to-finish vertex) 0)))
 
 (defn vertex-reset-all! [vertex]
   (vertex-reset-status! vertex)
   (vertex-reset-distance! vertex))
 
+; resets the vertices' distance, distance-to-finish
+; and it's status
 (defn graph-reset!
   ([graph]
    (graph-reset! graph vertex-reset-all!))
@@ -339,7 +342,7 @@
                             (dosync
                               (if (or (> @(:distance neighbor)
                                          (inc @(:distance vertex)))
-                                      (= @(:distance neighbor) 0))
+                                      (zero? @(:distance neighbor)))
                                 (ref-set (:distance neighbor)
                                          (inc @(:distance vertex))))
                               (if (graph-vertex-in-queue? graph neighbor-label)
@@ -379,7 +382,7 @@
                                                                   neighbor-label)
                                     distance (+ @(:distance vertex)
                                                 weight)]
-                                (when (or (= @(:distance neighbor) 0)
+                                (when (or (zero? @(:distance neighbor))
                                           (< distance @(:distance neighbor)))
                                   (dosync
                                     (ref-set (:distance neighbor)
@@ -443,7 +446,7 @@
                                     cost-estimation 
                                     (graph-great-circle-distance graph neighbor-label start)]
                                 (dosync (ref-set (:status neighbor) vertex-status-in-queue))
-                                (when (or (= @(:distance neighbor) 0)
+                                (when (or (zero? @(:distance neighbor))
                                           (< cost-estimation (+ @(:distance neighbor)
                                                                 @(:distance-to-finish neighbor))))
                                   (dosync
