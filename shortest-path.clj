@@ -1,7 +1,7 @@
 (defrecord Graph [vertices edges])
 (defrecord Edge [from to weight label])
 (defrecord Vertex 
-  [label neighbors latitude longitude status distance distance-to-finish])
+  [label neighbors latitude longitude status distance distance-to-finish component])
 
 (def ^:const vertex-status-unseen 0)
 (def ^:const vertex-status-in-queue 1)
@@ -186,7 +186,7 @@
                       label
                       (Vertex. label (ref '()) lat lon
                                (ref vertex-status-unseen)
-                               (ref 0) (ref 0)))) true)
+                               (ref 0) (ref 0) (ref 0)))) true)
     (do
       (println "Vertex already in the graph") false)))
 
@@ -262,7 +262,25 @@
   ([graph from to]
    (graph-get-edge-weight (graph-get-edge graph from to))))
 
-(defn graph-bfs! [graph start func queue]
+(defn graph-bfs! 
+  ; used for pre-processing the graph, assigning components
+  ; to each vertex
+  ([graph start cnt]
+   (loop [queue (list start)]
+     (when (not (empty? queue))
+       (let [current-label (first queue)
+             current-vertex (get @(:vertices graph) current-label)
+             current-neighbors @(:neighbors current-vertex)
+             unseen-neighbors (filter (fn [label]
+                                        (not (graph-vertex-visited? graph label)))
+                                      current-neighbors)]
+         (dosync (ref-set (:status current-vertex) 
+                          vertex-status-visited)
+                 (ref-set (:component current-vertex)
+                          cnt))
+         (recur (concat (rest queue) unseen-neighbors))))))
+  ; used with priority queue for dijkstra and A*
+  ([graph start func queue]
   (loop []
     (when-not (dlist-empty? queue)
       (let [current-label (dlist-first queue)
@@ -270,10 +288,35 @@
             current-neighbors @(:neighbors current-vertex)
             unseen-neighbors (filter #(graph-vertex-unseen? graph %1)
                                      current-neighbors)]
+        ; continue if current-vertex isn't the destination vertex
         (let [continue? (func current-vertex queue)]
           (dosync (ref-set (:status current-vertex) vertex-status-visited))
           (if continue?
-            (recur) (println "Marking stage done")))))))
+            (recur) (println "Marking stage done"))))))))
+
+; returns an unvisited vertex
+(defn graph-unvisited-vertices [g]
+  (filter (fn [vertex] (= @(:status vertex) 
+                          vertex-status-unseen))
+          (vals @(:vertices g))))
+
+; assigns a component to each vertex in the graph using bfs
+(defn graph-set-components! [g]
+  (graph-reset! g)
+  (loop [cnt 0]
+    (let [unvisited (graph-unvisited-vertices g)]
+      (if (empty? unvisited)
+        cnt
+        (do
+          (graph-bfs! g (:label (first unvisited)) cnt)
+          (recur (inc cnt))))))
+  (newline)
+  (println "Graph pre-processed!")
+  (println "Vertices in the graph:" (count @(:vertices g)))
+  (println "Edges in the graph:" (count @(:edges g)))
+  (newline)
+  (println "****************************************")
+  (newline))
 
 (defn validate-path-without-weights [neighbor best-distance vertex g]
   (and (= @(:status neighbor) vertex-status-visited)
@@ -313,26 +356,31 @@
           (do
             (println "**" current-label)
             (println "Arrived at finish!")
-            )))
-      (do
-        (newline)
-        (println "Path does not exist!"))) (reverse @ret-lst)))
+            )))) 
+    (newline)
+    (println "Path stored in a list:" (reverse @ret-lst))
+    (reverse @ret-lst)))
 
 (defn graph-dijkstra-helper! [graph start finish]
   (graph-reset! graph)
-  (dosync
-    (ref-set (:distance (graph-get-vertex graph finish)) 0))
   (let [queue (dlist-make)
         cnt (ref 0)]
+    ; inserting the finish vertex in a queue, because in each
+    ; iteration the first element is removed and used as 
+    ; the current vertex
     (dlist-prepend! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
                   (dlist-rem-first! queue)
+                  ; checks if start vertex is current-vertex, if 
+                  ; so it sets the continue? flag in graph-bfs! to false
                   (if (= start (:label vertex))
                     false
                       (do
                         (when-not (graph-vertex-visited? graph (:label vertex))
+                        ; increment counter for vertices visited
+                        ; statistic
                         (dosync (ref-set cnt (inc @cnt)))
                         (doseq [neighbor-label
                                 (filter (fn [label]
@@ -340,6 +388,9 @@
                                         @(:neighbors vertex))]
                           (let [neighbor (graph-get-vertex graph neighbor-label)]
                             (dosync
+                              ; sets the distance if one wasn't 
+                              ; set before or updates distance if the 
+                              ; distance would improve
                               (if (or (> @(:distance neighbor)
                                          (inc @(:distance vertex)))
                                       (zero? @(:distance neighbor)))
@@ -350,6 +401,7 @@
                                 (dlist-insert-priority! queue neighbor-label @(:distance neighbor)))
                               (ref-set (:status neighbor) vertex-status-in-queue))
                             ))
+                        ; sets the graph-bfs! continue? flag to true
                         true)))) queue)
     (println "Vertices visited:" @cnt)
     (newline)
@@ -357,19 +409,23 @@
 
 (defn graph-dijkstra-with-weights-helper! [graph start finish]
   (graph-reset! graph)
-  (dosync
-    (ref-set (:distance (graph-get-vertex graph finish)) 0))
   (let [queue (dlist-make)
         cnt (ref 0)]
+    ; inserting the finish vertex in a queue, because in each
+    ; iteration the first element is removed and used as 
+    ; the current vertex
     (dlist-prepend! queue finish @(:distance (graph-get-vertex graph finish)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
                   (dlist-rem-first! queue)
+                  ; checks if start vertex is current-vertex, if 
+                  ; so it sets the continue? flag in graph-bfs! to false
                   (if (= start (:label vertex))
                     false
                       (do
                         (when-not (graph-vertex-visited? graph (:label vertex))
+                        ; increment counter for vertices visited statistic
                         (dosync (ref-set cnt (inc @cnt)))
                             (doseq [neighbor-label
                                     (filter
@@ -382,6 +438,9 @@
                                                                   neighbor-label)
                                     distance (+ @(:distance vertex)
                                                 weight)]
+                                ; sets the distance if one wasn't 
+                                ; set before or updates distance if the 
+                                ; distance would improve
                                 (when (or (zero? @(:distance neighbor))
                                           (< distance @(:distance neighbor)))
                                   (dosync
@@ -392,6 +451,7 @@
                                   (dlist-insert-priority! queue neighbor-label @(:distance neighbor)))
                                 (dosync (ref-set (:status neighbor) vertex-status-in-queue))
                                 )))
+                            ; sets the graph-bfs! continue? flag to true
                             true))) 
                 queue)
     (println "Vertices visited:" @cnt)
@@ -422,11 +482,16 @@
   (graph-reset! graph)
   (let [queue (dlist-make)
         cnt (ref 0)]
+    ; inserting the finish vertex in a queue, because in each
+    ; iteration the first element is removed and used as 
+    ; the current vertex
     (dlist-prepend! queue finish @(:distance (graph-get-vertex graph start)))
     (graph-bfs! graph
                 finish
                 (fn [vertex queue]
                   (dlist-rem-first! queue)
+                  ; checks if start vertex is current-vertex, if 
+                  ; so it sets the continue? flag in graph-bfs! to false
                   (if (= start (:label vertex))
                     false
                       (do
@@ -443,9 +508,15 @@
                                                                   neighbor-label)
                                     distance (+ @(:distance vertex) 
                                                 weight)
+                                    ; distance from neighbor to the destination vertex
                                     cost-estimation 
-                                    (graph-great-circle-distance graph neighbor-label start)]
+                                    ; dividing the distance between vertices by 2, so that the 
+                                    ; heuristic isn't as aggressive and outputs more accurate results
+                                    (/ (graph-great-circle-distance graph neighbor-label start) 2)]
                                 (dosync (ref-set (:status neighbor) vertex-status-in-queue))
+                                ; sets the distance if one wasn't 
+                                ; set before or updates distance if the 
+                                ; distance would improve
                                 (when (or (zero? @(:distance neighbor))
                                           (< cost-estimation (+ @(:distance neighbor)
                                                                 @(:distance-to-finish neighbor))))
@@ -457,6 +528,7 @@
                                 (dlist-insert-priority! queue neighbor-label 
                                                         (+ cost-estimation @(:distance neighbor)))
                                 )))
+                            ; sets the graph-bfs! continue? flag to true
                             true)))
                 queue)
     (println "Vertices visited:" @cnt)
@@ -464,6 +536,8 @@
     (graph-trace-back graph start finish
                       validate-path-with-weights)))
 
+; formats the shortest path so that it outputs a series of instructions
+; how to get from start to finish
 (defn format-lst [g lst finish]
   (newline)(newline)
   (println "------------------------------------------")
@@ -499,31 +573,63 @@
             (recur (rest x)))
           (ref-set string (str @string "take the road to " finish
                                " and you will arrive at the finish!")))))
-    @string))
+    (println @string)
+    (newline)
+    (newline)))
 
 (defn graph-dijkstra! [graph start finish]
+  (println "----------Dijkstra's algorithm!----------")
+  (newline)
+  (println "++++++++++"start"to"finish"++++++++++")
+  (newline)
   (if (and (graph-has-vertex? graph start)
            (graph-has-vertex? graph finish))
+    (if (= @(:component (graph-get-vertex graph start))
+          @(:component (graph-get-vertex graph finish)))
     (let [lst (graph-dijkstra-helper! graph start finish)]
       (if-not (empty? lst)
         (format-lst graph lst finish)
         nil))
-    "Invalid vertices"))
+    (do
+    (println "A path between" start "and" finish "doesn't exist!")
+    (println "Vertices visited: 0")
+    (newline)))
+    (println "Invalid vertices")))
 
 (defn graph-dijkstra-with-weights! [graph start finish]
+  (println "----------Dijkstra's algorithm!----------")
+  (newline)
+  (println "++++++++++"start"to"finish"++++++++++")
+  (newline)
   (if (and (graph-has-vertex? graph start)
            (graph-has-vertex? graph finish))
+    (if (= @(:component (graph-get-vertex graph start))
+          @(:component (graph-get-vertex graph finish)))
     (let [lst (graph-dijkstra-with-weights-helper! graph start finish)]
       (if-not (empty? lst)
         (format-lst graph lst finish)
         nil))
-    "Invalid vertices"))
+    (do
+    (println "A path between" start "and" finish "doesn't exist!")
+    (println "Vertices visited: 0")
+    (newline)))
+    (println "Invalid vertices")))
 
 (defn graph-a*! [graph start finish]
+  (println "----------A* search algorithm!----------")
+  (newline)
+  (println "++++++++++"start"to"finish"++++++++++")
+  (newline)
   (if (and (graph-has-vertex? graph start)
            (graph-has-vertex? graph finish))
+    (if (= @(:component (graph-get-vertex graph start))
+          @(:component (graph-get-vertex graph finish)))
     (let [lst (graph-a*-helper! graph start finish)]
       (if-not (empty? lst)
         (format-lst graph lst finish)
         nil))
-    "Invalid vertices"))
+    (do
+    (println "A path between" start "and" finish "doesn't exist!")
+    (println "Vertices visited: 0")
+    (newline)))
+    (println "Invalid vertices")))
