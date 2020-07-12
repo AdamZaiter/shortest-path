@@ -124,25 +124,39 @@
   (reset-all! g)
   (graph-assign-components-loop g 0))
 
-(define (process-neighbors! g distance-so-far lst-of-neighbors queue vertex-label weights)
+(define (process-neighbors! g distance-so-far lst-of-neighbors queue vertex-label #:func-type func-type)
   (when (not (empty? lst-of-neighbors))
-    (let* ([current-neighbor (graph-get-vertex g (car lst-of-neighbors))]
+    (let* ([current-neighbor-label (car lst-of-neighbors)]
+           [current-neighbor (graph-get-vertex g current-neighbor-label)]
            [current-neighbor-distance (Vertex-distance current-neighbor)])
-      (if weights 
-        (let ([current-distance (Vertex-distance current-neighbor)]
-              [potential-distance (+ distance-so-far (graph-get-edge-weight g
-                                                                            (car lst-of-neighbors) vertex-label))])
-          (when (or (< potential-distance current-distance)
+      (cond 
+        [(equal? func-type "dijkstra-with-weights")
+         (let ([current-distance (Vertex-distance current-neighbor)]
+               [potential-distance (+ distance-so-far (graph-get-edge-weight g
+                                                                             current-neighbor-label vertex-label))])
+           (when (or (< potential-distance current-distance)
+                     (vertex-unseen? (Vertex-label current-neighbor)))
+             (set-Vertex-distance! current-neighbor potential-distance)))]
+        [(equal? func-type "a*")
+         (let ([current-estimation (Vertex-cost-estimation current-neighbor)]
+               [new-cost-estimation (+ distance-so-far (graph-get-edge-weight g
+                                                                              current-neighbor-label vertex-label)
+                                       (graph-great-circle-distance g vertex-label current-neighbor-label))]
+               [potential-distance (+ distance-so-far (graph-get-edge-weight g
+                                                                             current-neighbor-label vertex-label))])
+           (when (or (< new-cost-estimation current-estimation)
+                     (vertex-unseen? (Vertex-label current-neighbor)))
+             (set-Vertex-distance! current-neighbor potential-distance)
+             (set-Vertex-cost-estimation! current-neighbor new-cost-estimation)))]
+        [else
+          (when (or (< (add1 distance-so-far) (Vertex-distance current-neighbor))
                     (vertex-unseen? (Vertex-label current-neighbor)))
-            (set-Vertex-distance! current-neighbor potential-distance)))
-        (when (or (< (add1 distance-so-far) (Vertex-distance current-neighbor))
-                  (vertex-unseen? (Vertex-label current-neighbor)))
-          (set-Vertex-distance! current-neighbor (add1 distance-so-far))))
+            (set-Vertex-distance! current-neighbor (add1 distance-so-far)))])
       (set-Vertex-status! current-neighbor vertex-status-in-queue)
-      (heap-add! queue (list (Vertex-distance current-neighbor) (car lst-of-neighbors)))
-      (process-neighbors! g distance-so-far (cdr lst-of-neighbors) queue vertex-label weights))))
+      (heap-add! queue (list (Vertex-distance current-neighbor) current-neighbor-label))
+      (process-neighbors! g distance-so-far (cdr lst-of-neighbors) queue vertex-label #:func-type func-type))))
 
-(define (graph-bfs! g start queue [weights #f])
+(define (graph-bfs! g start queue #:func-type [func-type "dijkstra"])
   (if (equal? start (cadr (heap-min queue))) 
     (displayln "Marking stage done")
     (let* ([current-label (cadr (heap-min queue))]
@@ -156,8 +170,8 @@
       (heap-remove-min! queue)
       (when (vertex-not-visited? current-label)
         (set-Vertex-status! current-vertex vertex-status-visited)
-        (process-neighbors! g distance-so-far unvisited-neighbors queue current-label weights))
-      (when (heap-min queue) (graph-bfs! g start queue weights)))))
+        (process-neighbors! g distance-so-far unvisited-neighbors queue current-label #:func-type func-type))
+      (when (heap-min queue) (graph-bfs! g start queue #:func-type func-type)))))
 
 (define (dijkstra-without-weights! g start finish)
   (reset-all! g)
@@ -179,16 +193,16 @@
     (if (= (Vertex-component (graph-get-vertex g start)) (Vertex-component (graph-get-vertex g finish)))
       (begin
         (heap-add! pq (list 0 finish))
-        (graph-bfs! g start pq #t)
-        (trace-back g start finish #t))
+        (graph-bfs! g start pq #:func-type "dijkstra-with-weights")
+        (trace-back g start finish #:weights?  #t))
       "A path does not exist.")))
 
-(define (trace-back-helper g lst-of-neighbors [vertex-label #f])
+(define (trace-back-helper g lst-of-neighbors vertex-label #:weights? [weights? #f])
   (let ([best-distance +inf.0]
         [best-label ""])
     (for ([neighbor lst-of-neighbors])
       (let ([distance (Vertex-distance (graph-get-vertex g neighbor))])
-        (if vertex-label
+        (if weights? 
           (when (and 
                   (< distance best-distance)
                   (= (- (Vertex-distance (graph-get-vertex g vertex-label)) distance)
@@ -200,7 +214,7 @@
             (set! best-label neighbor)))))
     best-label))
 
-(define (trace-back g start finish [weights #f])
+(define (trace-back g start finish #:weights? [weights? #f])
   (printf "~a: ~a\n" start (Vertex-distance (graph-get-vertex g start)))
   (when (not (equal? start finish))
     (let* ([current-vertex (graph-get-vertex g start)]
@@ -210,10 +224,37 @@
                                   (if (= (Vertex-status (graph-get-vertex g v))
                                          vertex-status-visited)
                                     (cons v l) l)) '() neighbors)])
-      (if weights
-        (trace-back g
-                    (trace-back-helper g visited-neighbors start)
-                    finish)
-        (trace-back g
-                    (trace-back-helper g visited-neighbors)
-                    finish)))))
+      (trace-back g
+                  (trace-back-helper g visited-neighbors start #:weights? weights?)
+                  finish))))
+
+(define (graph-great-circle-distance graph label1 label2)
+  (let* ([vertex1 (graph-get-vertex graph label1)]
+         [vertex2 (graph-get-vertex graph label2)]
+         [lat1 (Vertex-latitude vertex1)]
+         [lon1 (Vertex-longitude vertex1)]
+         [lat2 (Vertex-latitude vertex2)]
+         [lon2 (Vertex-longitude vertex2)]
+         [dl (abs (- lon2 lon1))] ; lambda - longitude
+         [dp (abs (- lat2 lat1))] ; phi - latitude
+         [dlr (/ (* pi dl) 180)]
+         [dpr (/ (* pi dp) 180)]
+         [l1 (/ (* pi lon1) 180)]
+         [p1 (/ (* pi lat1) 180)]
+         [l2 (/ (* pi lon2) 180)]
+         [p2 (/ (* pi lat2) 180)]
+         [ds (acos (+ (* (sin p1) (sin p2))
+                      (* (cos p1) (cos p2) (cos dlr))))])
+    (* 6378 ds)))
+
+(define (a*! g start finish)
+  (reset-all! g)
+  (let ([pq (make-heap 
+              (lambda (p1 p2) 
+                (<= (car p1) (car p2))))])
+    (if (= (Vertex-component (graph-get-vertex g start)) (Vertex-component (graph-get-vertex g finish)))
+      (begin
+        (heap-add! pq (list 0 finish))
+        (graph-bfs! g start pq #:func-type "a*")
+        (trace-back g start finish #:weights? #t))
+      "A path does not exist.")))
